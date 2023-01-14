@@ -10,5 +10,49 @@ inputs:
     required: false
     default: pkgcheck>=0.10.3
 runs:
-  using: node16
-  main: dist/index.js
+  using: "composite"
+  steps:
+  - uses: actions/setup-python@v4
+    with:
+      python-version: '3.x'
+
+  - uses: actions/cache@v3
+    with:
+      path: |
+        ~/.cache/pip
+        ~/.cache/pkgcore
+        ~/.cache/pkgcheck
+      key: pkgcheck-${{ github.run_id }}
+      restore-keys:
+        pkgcheck
+
+  - name: Install pkgcheck
+    shell: bash
+    run: |
+      pip install --upgrade pip
+      pip install ${{ inputs.pkgs }}
+
+  - name: Sync gentoo repo
+    shell: bash
+    run: pmaint sync gentoo
+
+  - name: Update repo metadata
+    shell: bash
+    run: pmaint regen --dir ~/.cache/pkgcheck/repos .
+    continue-on-error: true
+
+  - name: Run pkgcheck
+    id: pkgcheck
+    shell: bash
+    continue-on-error: true
+    run: |
+      pkgcheck --color y ci --failures ~/failures.json --exit GentooCI ${{ inputs.args }}
+      echo "::set-output name=STATUS::$?"
+
+  - name: Failures report
+    shell: bash
+    if: steps.pkgcheck.outputs.STATUS != '1'
+    run: |
+      echo '\n\u001b[1m\u001b[38;2;255;0;0mFAILURE RESULTS'
+      pkgcheck replay --color y ~/failures.json
+      pkgcheck failed with exit code ${{ steps.pkgcheck.outputs.STATUS }}
